@@ -1,11 +1,13 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -44,10 +46,10 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		log.Printf("FormFile returned err: %v", err)
 	}
 	mediaType := headers.Header.Get("Content-Type")
-	dataSlice, err := io.ReadAll(data)
-	if err != nil {
-		log.Printf("io.ReadAll returned err: %v", err)
-	}
+	// dataSlice, err := io.ReadAll(data)
+	// if err != nil {
+	// 	log.Printf("io.ReadAll returned err: %v", err)
+	// }
 
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -58,19 +60,39 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		fmt.Printf("expected: %v\ngot: %v\n", userID, video.UserID)
 		return
 	}
-	thumbnail := thumbnail{
-		data:      dataSlice,
-		mediaType: mediaType,
-	}
-	base64Data := base64.StdEncoding.EncodeToString(thumbnail.data)
+	// thumbnail := thumbnail{
+	// 	data:      dataSlice,
+	// 	mediaType: mediaType,
+	// }
+	// base64Data := base64.StdEncoding.EncodeToString(thumbnail.data)
 
 	// videoThumbnails[video.ID] = thumbnail
 
-	// fmt.Printf("PORT: %v\n", cfg.port)
-	// thumbnailURL := fmt.Sprintf("http://localhost:%v/api/thumbnails/%v", cfg.port, video.ID)
-	dataURL := fmt.Sprintf("data:%v;base64,%v", thumbnail.mediaType, base64Data)
+	splitString := strings.Split(mediaType, "/")
+	fileExtension := splitString[1]
 
-	video.ThumbnailURL = &dataURL
+	filePath := fmt.Sprintf("%v.%v", videoID, fileExtension)
+	// fmt.Printf("thumbnailURL: %v", thumbnailURL)
+
+	assetsRoot := cfg.assetsRoot
+	completePath := filepath.Join(assetsRoot, filePath)
+	fmt.Printf("completePath: %v\n", completePath)
+
+	newFile, err := os.Create(completePath)
+	if err != nil {
+		log.Printf("os.Create returned err: %v", err)
+	}
+	fmt.Printf("newFile: %v\n", *newFile)
+	bytesWritten, err := io.Copy(newFile, data)
+	if err != nil {
+		log.Printf("io.Copy returned err: %v", err)
+	}
+	fmt.Printf("copied %d bytes\n", bytesWritten)
+	// dataURL := fmt.Sprintf("data:%v;base64,%v", thumbnail.mediaType, base64Data)
+	thumbnailURL := fmt.Sprintf("http://localhost:%v/assets/%v", cfg.port, filePath)
+	fmt.Printf("thumbnailURL: %v", thumbnailURL)
+
+	video.ThumbnailURL = &thumbnailURL
 	if err := cfg.db.UpdateVideo(video); err != nil {
 		fmt.Printf("UpdateVideo returned err: %v", err)
 	}
