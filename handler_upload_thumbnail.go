@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,6 +47,15 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		log.Printf("FormFile returned err: %v", err)
 	}
 	mediaType := headers.Header.Get("Content-Type")
+	mimeType, params, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		log.Printf("ParseMediaType returned err: %v", err)
+	}
+	fmt.Printf("mediaType: %v, mimeType: %v\nparams: %v\n", mediaType, mimeType, params)
+	if mimeType != "image/jpeg" && mimeType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "unsupported file format", nil)
+		return
+	}
 	// dataSlice, err := io.ReadAll(data)
 	// if err != nil {
 	// 	log.Printf("io.ReadAll returned err: %v", err)
