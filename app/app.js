@@ -262,7 +262,7 @@ function viewVideo(video) {
   } else {
     thumbnailImg.style.display = 'block';
     timeNow = Date.now()
-    thumbnailImg.src = `${video.thumbnail_url}?v=${timeNow}`;
+    thumbnailImg.src = video.thumbnail_url;
   }
 
   const videoPlayer = document.getElementById('video-player');
