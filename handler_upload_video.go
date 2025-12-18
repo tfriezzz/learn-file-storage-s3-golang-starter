@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -74,6 +76,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
+
 	bytesCopied, err := io.Copy(file, data)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "io.Copy returned err:", err)
@@ -81,12 +84,25 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 	fmt.Printf("copied %d bytes\n", bytesCopied)
 
-	// filePath := fmt.Sprintf("./%v", tempName)
+	processedFilePath, err := processVideoForFastStart(file.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "can't process video", err)
+		return
+	}
+
 	prefix, err := getVideoAspectRatio(file.Name())
 	if err != nil {
 		fmt.Printf("aspectRatio: %v", prefix)
 		respondWithError(w, http.StatusInternalServerError, "couldn't get aspectRatio", err)
 	}
+
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "can't open processed file", err)
+		return
+	}
+	defer os.Remove(processedFilePath)
+	defer processedFile.Close()
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "couldn't reset file pointer", err)
@@ -101,7 +117,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	objectParams := &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &fileKey,
-		Body:        file,
+		Body:        processedFile,
 		ContentType: &mimeType,
 	}
 
@@ -113,10 +129,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	dbVideo, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "somethingelse", err)
+		return
 	}
 
-	videoURL := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", cfg.s3Bucket, cfg.s3Region, fileKey)
+	// videoURL := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", cfg.s3Bucket, cfg.s3Region, fileKey)
+
+	// HACK: Is this correct?
+	videoURL := fmt.Sprintf("%v,%v", cfg.s3Bucket, fileKey)
 	fmt.Println(videoURL)
+
 	dbVideo.VideoURL = &videoURL
 
 	if err := cfg.db.UpdateVideo(dbVideo); err != nil {
@@ -127,20 +148,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 func getVideoAspectRatio(filePath string) (string, error) {
 	fmt.Printf("filePath: %v\n", filePath)
-	// arg := fmt.Sprintf("-v error -print_format json -show_streams %v", filePath)
-	// args := []string{
-	// "-v", "error", "-print_format", "json", "-show_streams", filePath,
-	// }
-	// cmd := exec.Command("ffprobe", strings.Join(args, " "))
 	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
-	// b := bytes.NewBuffer(make([]byte, 20))
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
 	if err := cmd.Run(); err != nil {
 		log.Printf("ffprobe err: %v", err)
-		// return "other", nil
 	}
 
 	var output struct {
@@ -160,8 +174,6 @@ func getVideoAspectRatio(filePath string) (string, error) {
 
 	width := output.Streams[0].Width
 	height := output.Streams[0].Height
-	// aspectRatio := classifyAspectRatio(width, height)
-	// fmt.Printf("file: %v, aspectRatio: %v\n", filePath, aspectRatio)
 
 	if width > height {
 		return "landscape", nil
@@ -171,48 +183,30 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	} else {
 		return "other", nil
 	}
-
-	// switch aspectRatio {
-	// case "16:9":
-	// 	return "16:9", nil
-	// case "9:16":
-	// 	return "9:16", nil
-	// default:
-	// 	return "other", nil
-	// }
 }
 
-// func classifyAspectRatio(width, height int) string {
-// 	tolerance := 0.05
-// 	ratio := float64(width) / float64(height)
-//
-// 	landscape169 := 16.0 / 9.0 // ~1.7778
-// 	portrait916 := 9.0 / 16.0  // ~0.5625
-//
-// 	if math.Abs(ratio-landscape169) < tolerance {
-// 		return "landscape 16:9"
-// 	}
-// 	if math.Abs(ratio-portrait916) < tolerance {
-// 		return "portrait 9:16"
-// 	}
-//
-// 	return "other"
-// }
+func processVideoForFastStart(filePath string) (string, error) {
+	outputFilePath := fmt.Sprintf("%v.processing", filePath)
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputFilePath)
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return outputFilePath, nil
+}
 
-// func gcd(a, b int) int {
-// 	for b != 0 {
-// 		a, b = b, a%b
-// 	}
-// 	return a
-// }
-//
-// func reducedAspectRatio(width, height int) (int, int) {
-// 	divisor := gcd(width, height)
-// 	return width / divisor, height / divisor
-// }
-//
-// func aspectRatioString(width int, height int) (aspectRatio string) {
-// 	w, h := reducedAspectRatio(width, height)
-// 	aspectRatio = fmt.Sprintf("%d:%d", w, h)
-// 	return aspectRatio
-// }
+func generatePresignedURL(s3Clien *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	client := s3.NewPresignClient(s3Clien)
+
+	getObjectArgs := s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	}
+
+	res, err := client.PresignGetObject(context.Background(), &getObjectArgs, s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "", fmt.Errorf("PresignGetObject err: %v", err)
+	}
+
+	fmt.Printf("request: %v", res.URL)
+	return res.URL, nil
+}
