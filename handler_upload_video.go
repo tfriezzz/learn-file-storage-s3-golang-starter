@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,12 +12,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
-	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -137,17 +133,17 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// e videoURL := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", cfg.s3Bucket, cfg.s3Region, fileKey)
 
 	// HACK: Is this correct?
-	videoURL := fmt.Sprintf("%v,%v", cfg.s3Bucket, fileKey)
+	videoURL := fmt.Sprintf("%v/%v", cfg.s3CfDistribution, fileKey)
 	fmt.Println(videoURL)
 
 	dbVideo.VideoURL = &videoURL
 
-	signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
-	if err != nil {
-	}
+	// signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
+	// if err != nil {
+	// }
 
 	// if err := cfg.db.UpdateVideo(dbVideo); err != nil {
-	if err := cfg.db.UpdateVideo(signedVideo); err != nil {
+	if err := cfg.db.UpdateVideo(dbVideo); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "couldn't update videoURL", err)
 		return
 	}
@@ -201,52 +197,52 @@ func processVideoForFastStart(filePath string) (string, error) {
 	return outputFilePath, nil
 }
 
-func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
-	client := s3.NewPresignClient(s3Client)
-
-	getObjectArgs := s3.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-	}
-
-	res, err := client.PresignGetObject(context.Background(), &getObjectArgs, s3.WithPresignExpires(expireTime))
-	if err != nil {
-		return "", fmt.Errorf("PresignGetObject err: %v", err)
-	}
-
-	fmt.Printf("request: %v", res.URL)
-	return res.URL, nil
-}
-
-func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
-	fmt.Printf("before VideoURL: %v", video.VideoURL)
-
-	videoURL := video.VideoURL
-
-	if videoURL == nil {
-		fmt.Println("empty video address")
-		return video, nil
-	}
-	if len(*videoURL) == 0 {
-		fmt.Println("empty videoURL")
-		return video, nil
-	}
-	if ok := strings.Contains(*videoURL, ","); !ok {
-		fmt.Println("no comma")
-		return video, nil
-	}
-
-	bucketKey := strings.Split(*videoURL, ",")
-	bucket := bucketKey[0]
-	key := bucketKey[1]
-
-	presignedURL, err := generatePresignedURL(cfg.s3Client, bucket, key, time.Hour) // HACK:time.Duration?
-	if err != nil {
-		return database.Video{}, fmt.Errorf("generatePresignedURL err: %v", err)
-	}
-
-	video.VideoURL = &presignedURL
-	fmt.Printf("after VideoURL: %v", video.VideoURL)
-
-	return video, nil
-}
+// func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+// 	client := s3.NewPresignClient(s3Client)
+//
+// 	getObjectArgs := s3.GetObjectInput{
+// 		Bucket: &bucket,
+// 		Key:    &key,
+// 	}
+//
+// 	res, err := client.PresignGetObject(context.Background(), &getObjectArgs, s3.WithPresignExpires(expireTime))
+// 	if err != nil {
+// 		return "", fmt.Errorf("PresignGetObject err: %v", err)
+// 	}
+//
+// 	fmt.Printf("request: %v", res.URL)
+// 	return res.URL, nil
+// }
+//
+// func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+// 	fmt.Printf("before VideoURL: %v", video.VideoURL)
+//
+// 	videoURL := video.VideoURL
+//
+// 	if videoURL == nil {
+// 		fmt.Println("empty video address")
+// 		return video, nil
+// 	}
+// 	if len(*videoURL) == 0 {
+// 		fmt.Println("empty videoURL")
+// 		return video, nil
+// 	}
+// 	if ok := strings.Contains(*videoURL, ","); !ok {
+// 		fmt.Println("no comma")
+// 		return video, nil
+// 	}
+//
+// 	bucketKey := strings.Split(*videoURL, ",")
+// 	bucket := bucketKey[0]
+// 	key := bucketKey[1]
+//
+// 	presignedURL, err := generatePresignedURL(cfg.s3Client, bucket, key, time.Hour) // HACK:time.Duration?
+// 	if err != nil {
+// 		return database.Video{}, fmt.Errorf("generatePresignedURL err: %v", err)
+// 	}
+//
+// 	video.VideoURL = &presignedURL
+// 	fmt.Printf("after VideoURL: %v", video.VideoURL)
+//
+// 	return video, nil
+// }
