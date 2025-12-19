@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -132,7 +134,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// videoURL := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", cfg.s3Bucket, cfg.s3Region, fileKey)
+	// e videoURL := fmt.Sprintf("https://%v.s3.%v.amazonaws.com/%v", cfg.s3Bucket, cfg.s3Region, fileKey)
 
 	// HACK: Is this correct?
 	videoURL := fmt.Sprintf("%v,%v", cfg.s3Bucket, fileKey)
@@ -140,7 +142,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	dbVideo.VideoURL = &videoURL
 
-	if err := cfg.db.UpdateVideo(dbVideo); err != nil {
+	signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
+	if err != nil {
+	}
+
+	// if err := cfg.db.UpdateVideo(dbVideo); err != nil {
+	if err := cfg.db.UpdateVideo(signedVideo); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "couldn't update videoURL", err)
 		return
 	}
@@ -194,8 +201,8 @@ func processVideoForFastStart(filePath string) (string, error) {
 	return outputFilePath, nil
 }
 
-func generatePresignedURL(s3Clien *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
-	client := s3.NewPresignClient(s3Clien)
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	client := s3.NewPresignClient(s3Client)
 
 	getObjectArgs := s3.GetObjectInput{
 		Bucket: &bucket,
@@ -209,4 +216,37 @@ func generatePresignedURL(s3Clien *s3.Client, bucket, key string, expireTime tim
 
 	fmt.Printf("request: %v", res.URL)
 	return res.URL, nil
+}
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	fmt.Printf("before VideoURL: %v", video.VideoURL)
+
+	videoURL := video.VideoURL
+
+	if videoURL == nil {
+		fmt.Println("empty video address")
+		return video, nil
+	}
+	if len(*videoURL) == 0 {
+		fmt.Println("empty videoURL")
+		return video, nil
+	}
+	if ok := strings.Contains(*videoURL, ","); !ok {
+		fmt.Println("no comma")
+		return video, nil
+	}
+
+	bucketKey := strings.Split(*videoURL, ",")
+	bucket := bucketKey[0]
+	key := bucketKey[1]
+
+	presignedURL, err := generatePresignedURL(cfg.s3Client, bucket, key, time.Hour) // HACK:time.Duration?
+	if err != nil {
+		return database.Video{}, fmt.Errorf("generatePresignedURL err: %v", err)
+	}
+
+	video.VideoURL = &presignedURL
+	fmt.Printf("after VideoURL: %v", video.VideoURL)
+
+	return video, nil
 }
